@@ -1,0 +1,14 @@
+version: 2
+jobs:
+  test:
+    docker:
+      - image: circleci/python:3
+    working_directory: /home/circleci/gitstats
+    steps:
+      - checkout
+      - run:
+          name: test
+          command: ./gitstats . html
+      - store_artifacts:
+          path: html
+
