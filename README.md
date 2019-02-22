@@ -6,6 +6,6 @@ A fork of the classic utility gitstats.
 
 This fork allows to skip some files extensions from LOC calculation, and skips some by default (see `./gitstats --help`)
 
- - [Original docs](docs/gitstats.pod)
+ - [Original docs](doc/gitstats.pod)
  - [Examples of output](http://gitstats.sourceforge.net/examples/)
 
