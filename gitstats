@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # Copyright (c) 2007-2014 Heikki Hokkanen <hoxu@users.sf.net> & others (see doc/AUTHOR)
 # GPLv2 / GPLv3
 import datetime
@@ -47,7 +47,8 @@ conf = {
 	'linear_linestats': 1,
 	'project_name': '',
 	'processes': 8,
-	'start_date': ''
+	'start_date': '',
+	'skip_extensions': 'lock,png,pdf,iml,ttf,dll,woff,woff2,docx,gif,eot,jpg'
 }
 
 def getpipeoutput(cmds, quiet = False):
@@ -103,6 +104,18 @@ def getstatsummarycounts(line):
 	elif len(numbers) == 2 and line.find('(-)') != -1:
 		numbers.insert(1, 0); # only deletions were printed on line
 	return numbers
+
+def getlinefileinfo(line):
+	parts = re.split('\s+', line, 4)
+	if parts[0] == '160000' and parts[3] == '-':
+		# skip submodules
+		return {submodule: True}
+	blob_id = parts[2]
+	size = int(parts[3])
+	fullpath = parts[4]
+
+	filename = fullpath.split('/')[-1] # strip directories
+	return { 'filename': filename, 'size': size, 'blob_id': blob_id, 'submodule': False }
 
 VERSION = 0
 def getversion():
@@ -287,7 +300,6 @@ class GitDataCollector(DataCollector):
 		DataCollector.collect(self, dir)
 
 		self.total_authors += int(getpipeoutput(['git shortlog -s %s' % getlogrange(), 'wc -l']))
-		#self.total_lines = int(getoutput('git-ls-files -z |xargs -0 cat |wc -l'))
 
 		# tags
 		lines = getpipeoutput(['git show-ref --tags']).split('\n')
@@ -479,27 +491,37 @@ class GitDataCollector(DataCollector):
 		# extensions and size of files
 		lines = getpipeoutput(['git ls-tree -r -l -z %s' % getcommitrange('HEAD', end_only = True)]).split('\000')
 		blobs_to_read = []
+		skipped_extensions = set(map(lambda s : s.strip(), conf['skip_extensions'].split(',')))
+		skipped_filenames = {}
 		for line in lines:
 			if len(line) == 0:
 				continue
-			parts = re.split('\s+', line, 4)
-			if parts[0] == '160000' and parts[3] == '-':
+
+		  	fileinfo = getlinefileinfo(line)
+			if fileinfo['submodule']:
 				# skip submodules
 				continue
-			blob_id = parts[2]
-			size = int(parts[3])
-			fullpath = parts[4]
+			blob_id = fileinfo['blob_id']
+			size = fileinfo['size']
+			filename = fileinfo['filename']
+
+			if filename.find('.') == -1:
+			    ext = ''
+			elif filename.rfind('.') == 0:
+				skipped_filenames[filename] = True
+				continue
+			else:
+				ext = filename[(filename.rfind('.') + 1):]
+			if len(ext) > conf['max_ext_length']:
+				skipped_filenames[filename] = True
+				continue
+			if ext in skipped_extensions:
+				skipped_filenames[filename] = True
+				continue
 
 			self.total_size += size
 			self.total_files += 1
 
-			filename = fullpath.split('/')[-1] # strip directories
-			if filename.find('.') == -1 or filename.rfind('.') == 0:
-				ext = ''
-			else:
-				ext = filename[(filename.rfind('.') + 1):]
-			if len(ext) > conf['max_ext_length']:
-				ext = ''
 			if ext not in self.extensions:
 				self.extensions[ext] = {'files': 0, 'lines': 0}
 			self.extensions[ext]['files'] += 1
@@ -510,6 +532,7 @@ class GitDataCollector(DataCollector):
 				continue
 			if blob_id in self.cache['lines_in_blob'].keys():
 				self.extensions[ext]['lines'] += self.cache['lines_in_blob'][blob_id]
+				self.total_lines += self.cache['lines_in_blob'][blob_id]
 			else:
 				blobs_to_read.append((ext,blob_id))
 
@@ -525,6 +548,7 @@ class GitDataCollector(DataCollector):
 				self.cache['lines_in_blob'] = {}
 			self.cache['lines_in_blob'][blob_id] = linecount
 			self.extensions[ext]['lines'] += self.cache['lines_in_blob'][blob_id]
+			self.total_lines += self.cache['lines_in_blob'][blob_id]
 
 		# line statistics
 		# outputs:
@@ -543,7 +567,7 @@ class GitDataCollector(DataCollector):
 		for line in lines:
 			if len(line) == 0:
 				continue
-
+			
 			# <stamp> <author>
 			if re.search('files? changed', line) == None:
 				pos = line.find(' ')
@@ -580,7 +604,6 @@ class GitDataCollector(DataCollector):
 					print 'Warning: failed to handle line "%s"' % line
 					(files, inserted, deleted) = (0, 0, 0)
 				#self.changes_by_date[stamp] = { 'files': files, 'ins': inserted, 'del': deleted }
-		self.total_lines += total_lines
 
 		# Per-author statistics
 
