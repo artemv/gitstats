@@ -12,3 +12,8 @@ jobs:
       - store_artifacts:
           path: html
 
+workflows:
+  version: 2
+  main:
+    jobs:
+      - test
